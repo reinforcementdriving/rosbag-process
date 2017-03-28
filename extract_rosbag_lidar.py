@@ -9,116 +9,112 @@ import argparse
 import numpy as np
 import rosbag
 import sensor_msgs.point_cloud2
-import matplotlib.pyplot as plt
-#from PIL import Image
-import math
+import matplotlib.cm
+import matplotlib.colors
+import matplotlib.image as mpimg
 
-def lidar_to_2d_front_view(points,
-                           v_res,
-                           h_res,
-                           v_fov,
-                           values,                            
-                           output,
-                           cmap = 'jet',
-                           y_fudge=0.0,
-                           dpi=100
-                           ):
-    """ Takes points in 3D space from LIDAR data and projects them to a 2D
-        "front view" images with  up to three channels (Height, Distance, Intensity) , and saves that images.
+LIDAR_MAX_HEIGHT = 5
+LIDAR_MIN_HEIGHT = -2
+HRES = 0.35  # horizontal resolution (assuming 20Hz setting)
+VRES = 0.4  # vertical res
+VFOV = (-24.9, 2.0)  # Field of view (-ve, +ve) along vertical axis
+Y_ADJUST = 25
 
-    Args:
-        points: (np array)
-            The numpy array containing the lidar points.
-            The shape should be Nx4
-            - Where N is the number of points, and
-            - each point is specified by 4 values (x, y, z, intensity)
-        v_res: (float)
-            vertical resolution of the lidar sensor used.
-        h_res: (float)
-            horizontal resolution of the lidar sensor used.
-        v_fov: (tuple of two floats)
-            (minimum_negative_angle, max_positive_angle)
-        values: (list)
-            What value to use to encode the points that get plotted.
-            One or more of {"distance", "height", "intensity"}
-        cmap: (str)
-            Color map to use to color code the values.
-            NOTE: Must be a value accepted by matplotlib's scatter function
-            Examples: "jet", "gray"
-        output: (list)
-            List of output filenames.
-            If None, then it just shows the image.
-        y_fudge: (float)
-            A hacky fudge factor to use if the theoretical calculations of
-            vertical range do not match the actual data.
 
-            For a Velodyne HDL 64E, set this value to 5.
-       dpi: (int)
-    """
+def lidar_2d_front_view(points, res, fov, type, cmap = None, y_adjust=0.0):
 
-    # DUMMY PROOFING
-    assert len(v_fov) ==2, "v_fov must be list/tuple of length 2"
-    assert v_fov[0] <= 0, "first element in v_fov must be 0 or negative"   
+    assert len(res) == 2, "res must be list/tuple of length 2"
+    assert len(fov) == 2, "fov must be list/tuple of length 2"
+    assert fov[0] <= 0, "first element in fov must be 0 or negative"
+    assert type in ['intensity', 'height', 'distance'], "type must be 'intensity', 'height', or 'distance'"
 
-    x_lidar = points[:, 0]
-    y_lidar = points[:, 1]
-    z_lidar = points[:, 2]
-    r_lidar = points[:, 3] # intensity
-    # Distance relative to origin when looked from top
-    d_lidar = np.sqrt(x_lidar ** 2 + y_lidar ** 2)
+    # gather the lidar data
+    x = points[:, 0]
+    y = points[:, 1]
+    z = points[:, 2]
+    r = points[:, 3]
 
-    v_fov_total = -v_fov[0] + v_fov[1]
+    # L2 norm of X,Y dimension (distance from sensor)
+    distance = np.sqrt(x ** 2 + y ** 2)
+    l2_norm = np.sqrt(x ** 2 + y ** 2 + z ** 2)
 
-    # Convert to Radians
-    v_res_rad = v_res * (np.pi/180)
-    h_res_rad = h_res * (np.pi/180)
+    v_fov_total = abs(fov[0] - fov[1])
 
-    # PROJECT INTO IMAGE COORDINATES
-    x_img = np.arctan2(-y_lidar, x_lidar)/ h_res_rad
-    y_img = np.arctan2(z_lidar, d_lidar)/ v_res_rad
+    # radians
+    res_rad = np.array(res) * (np.pi/180)
 
-    # SHIFT COORDINATES TO MAKE 0,0 THE MINIMUM
-    x_min = -360.0 / h_res / 2  # Theoretical min x value based on sensor specs
-    x_img -= x_min              # Shift
-    x_max = 360.0 / h_res       # Theoretical max x value after shifting
+    # image coordinates
+    x_img = np.arctan2(-y, x) / res_rad[1]
+    y_img = np.arctan2(z, distance) / res_rad[0]
 
-    y_min = v_fov[0] / v_res    # theoretical min y value based on sensor specs
-    y_img -= y_min              # Shift
-    y_max = v_fov_total / v_res # Theoretical max x value after shifting
+    # shift origin
+    x_min = -360.0 / res[1] / 2
+    x_img -= x_min
+    x_max = 360.0 / res[1]
 
-    y_max += y_fudge            # Fudge factor if the calculations based on
-                                # spec sheet do not match the range of
-                                # angles collected by in the data.   
+    y_min = fov[0] / res[0]
+    y_img -= y_min
+    y_max = v_fov_total / res[0]
 
-    fig, ax = plt.subplots(figsize=(x_max/dpi, y_max/dpi), dpi=dpi)
-    for i in range(len(values)):  
-        # WHAT DATA TO USE TO ENCODE THE VALUE FOR EACH PIXEL
-        if values[i] == "intensity":
-            pixel_values = r_lidar
-        elif values[i] == "height":
-            pixel_values = z_lidar
-        else:
-            pixel_values = d_lidar        
-        
-        ax.scatter(x_img,y_img, s=1, c=pixel_values, linewidths=0, alpha=1, cmap=cmap)
-        ax.set_facecolor((0, 0, 0)) # Set regions with no points to black
-        ax.axis('scaled')              # {equal, scaled}
-        ax.xaxis.set_visible(False)    # Do not draw axis tick marks
-        ax.yaxis.set_visible(False)    # Do not draw axis tick marks
-        plt.xlim([0, x_max])   # prevent drawing empty space outside of horizontal FOV
-        plt.ylim([0, y_max])   # prevent drawing empty space outside of vertical FOV
+    y_max += y_adjust
 
-        fig.savefig(output[i], dpi=dpi, bbox_inches='tight', pad_inches=0.0)
-        plt.cla()
-        
-    plt.close()
-    
+    colormap = matplotlib.cm.ScalarMappable(cmap=cmap) if cmap is not None else None
+    min_val = 0
+
+    if type == "intensity":
+        pixel_values = r
+    elif type == "height":
+        pixel_values = z
+        if cmap is not None:
+            colormap = matplotlib.cm.ScalarMappable(cmap=cmap,
+                                                    norm=matplotlib.colors.Normalize(
+                                                        vmin=LIDAR_MIN_HEIGHT,
+                                                        vmax=LIDAR_MAX_HEIGHT)
+                                                    )
+        min_val = LIDAR_MIN_HEIGHT
+    elif type == 'distance':
+        pixel_values = distance
+    else:
+        pixel_values = None
+
+    y_img_int = y_img.astype(int)
+    x_img_int = x_img.astype(int)
+    img = np.ones((int(y_max) + 1, int(x_max) + 1)) * min_val
+    norm = np.ones((int(y_max) + 1, int(x_max) + 1)) * 10000
+
+    # should only keep point nearest to observer for duplicate x,y values
+    for x, y, p, l in zip(x_img_int, y_img_int, pixel_values, l2_norm):
+        if norm[y, x] > l:
+            img[y, x] = p
+            norm[y, x] = l
+
+    # flip pixels because y-axis increases as the laser angle increases downward
+    img = np.flipud(img)
+
+    retval = colormap.to_rgba(img, bytes=True, norm=True)[:,:,0:3] if cmap is not None else img
+
+    return retval
+
+
+def generate_lidar_2d_front_view(msg, cmap=None):
+
+    points = sensor_msgs.point_cloud2.read_points(msg, skip_nans=False)
+    points = np.array(list(points))
+
+    img_intensity = lidar_2d_front_view(points, res=(VRES, HRES), fov=VFOV, type='intensity', y_adjust=Y_ADJUST, cmap=cmap)
+    img_distance = lidar_2d_front_view(points, res=(VRES, HRES), fov=VFOV, type='distance', y_adjust=Y_ADJUST, cmap=cmap)
+    img_height = lidar_2d_front_view(points, res=(VRES, HRES), fov=VFOV, type='height', y_adjust=Y_ADJUST, cmap=cmap)
+
+    return {'intensity': img_intensity, 'distance': img_distance, 'height': img_height}
+
+
 def main():
     """Extract velodyne points and project to 2D images from a ROS bag
     """
     parser = argparse.ArgumentParser(description="Extract velodyne points and project to 2D images from a ROS bag.")
     parser.add_argument("bag_file", help="Input ROS bag.")
-    parser.add_argument("output_dir", help="Output directory.")   
+    parser.add_argument("output_dir", help="Output directory.")
+    parser.add_argument("--cmap", help="Color Map.", default='jet')
 
     args = parser.parse_args()
     bag_file = args.bag_file
@@ -131,25 +127,16 @@ def main():
         print('output_dir ' + output_dir + ' does not exist')
         sys.exit()
         
-    values = ['height', 'distance', 'intensity']
-    
     print("Extract velodyne_points from {} into {}".format(args.bag_file, args.output_dir))
-    HRES = 0.35         # horizontal resolution (assuming 20Hz setting)
-    VRES = 0.4          # vertical res
-    VFOV = (-24.9, 2.0) # Field of view (-ve, +ve) along vertical axis
-    Y_FUDGE = 5         # y fudge factor for velodyne HDL 64E
-    DPI = 100           # Image resolution 
     
     bag = rosbag.Bag(bag_file, "r")
     count = 0
-    for topic, msg, t in bag.read_messages(topics=['/velodyne_points']):
-        points = sensor_msgs.point_cloud2.read_points(msg, field_names=['x', 'y', 'z', 'intensity'], skip_nans=False)        
-        points = np.array(list(points))
-               
-        outfiles = [(output_dir + '/{0:06d}_{1}.png').format(count, v) for v in values]
-        lidar_to_2d_front_view(points, v_res=VRES, h_res=HRES, v_fov=VFOV, values=values,
-                               output=outfiles, y_fudge=Y_FUDGE, dpi=DPI)
 
+    for topic, msg, t in bag.read_messages(topics=['/velodyne_points']):
+        images = generate_lidar_2d_front_view(msg, cmap=args.cmap)
+        mpimg.imsave('./{}/{:05}_intensity.png'.format(args.output_dir, count), images['intensity'], origin='upper')
+        mpimg.imsave('./{}/{:05}_distance.png'.format(args.output_dir, count), images['distance'], origin='upper')
+        mpimg.imsave('./{}/{:05}_height.png'.format(args.output_dir, count), images['height'], origin='upper')
         count += 1
 
     bag.close()

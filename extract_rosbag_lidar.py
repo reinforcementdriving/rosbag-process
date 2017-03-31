@@ -1,5 +1,6 @@
 #!/usr/bin/python
 """Extract lidar frontview images from a rosbag.
+   usage: python extract_rosbag_lidar bag_file output_dir
 """
 
 import os

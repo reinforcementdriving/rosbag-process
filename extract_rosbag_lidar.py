@@ -108,6 +108,12 @@ def generate_lidar_2d_front_view(msg, cmap=None):
     return {'intensity': img_intensity, 'distance': img_distance, 'height': img_height}
 
 
+def save_lidar_2d_images(output_dir, count, images):
+    mpimg.imsave('./{}/{}_intensity.png'.format(output_dir, count), images['intensity'], origin='upper')
+    mpimg.imsave('./{}/{}_distance.png'.format(output_dir, count), images['distance'], origin='upper')
+    mpimg.imsave('./{}/{}_height.png'.format(output_dir, count), images['height'], origin='upper')
+
+
 def main():
     """Extract velodyne points and project to 2D images from a ROS bag
     """
@@ -130,14 +136,10 @@ def main():
     print("Extract velodyne_points from {} into {}".format(args.bag_file, args.output_dir))
     
     bag = rosbag.Bag(bag_file, "r")
-    count = 0
 
     for topic, msg, t in bag.read_messages(topics=['/velodyne_points']):
         images = generate_lidar_2d_front_view(msg, cmap=args.cmap)
-        mpimg.imsave('./{}/{:05}_intensity.png'.format(args.output_dir, count), images['intensity'], origin='upper')
-        mpimg.imsave('./{}/{:05}_distance.png'.format(args.output_dir, count), images['distance'], origin='upper')
-        mpimg.imsave('./{}/{:05}_height.png'.format(args.output_dir, count), images['height'], origin='upper')
-        count += 1
+        save_lidar_2d_images(output_dir, t, images)
 
     bag.close()
 

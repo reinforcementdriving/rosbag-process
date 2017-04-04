@@ -19,10 +19,11 @@ class ROSBagExtractor:
         self.cmap = cmap
         self.output_dir = output_dir
 
-        if not(os.path.isdir(self.output_dir + '/lidar_360/')):
-            os.makedirs(self.output_dir + '/lidar_360/')
-        if not (os.path.isdir(self.output_dir + '/camera/')):
-            os.makedirs(self.output_dir + '/camera/')
+        if output_dir is not None:
+            if not(os.path.isdir(self.output_dir + '/lidar_360/')):
+                os.makedirs(self.output_dir + '/lidar_360/')
+            if not (os.path.isdir(self.output_dir + '/camera/')):
+                os.makedirs(self.output_dir + '/camera/')
 
     @staticmethod
     def save_images(output_dir, name, count, image):
@@ -96,16 +97,20 @@ class ROSBagExtractor:
             elif 'right' in topic:
                 name = 'right'
 
-            self.save_images(self.output_dir + '/camera/', name, timestamp, cv_img)
+            if self.output_dir is not None:
+                self.save_images(self.output_dir + '/camera/', name, timestamp, cv_img)
 
         elif msg_type in ['sensor_msgs/PointCloud2'] and 'velo' in topic:
 
             # render top down point cloud
             lidar_images = generate_lidar_2d_front_view(msg, cmap=self.cmap)
-            img.extend(map(self.convert_img, lidar_images.values()))
+            img.extend(
+                map(self.convert_img, [lidar_images['intensity'], lidar_images['distance'], lidar_images['height']])
+            )
 
             # save files
-            save_lidar_2d_images(self.output_dir + '/lidar_360/', timestamp, lidar_images)
+            if self.output_dir is not None:
+                save_lidar_2d_images(self.output_dir + '/lidar_360/', timestamp, lidar_images)
 
             window.extend([
                 self.get_window(topic + '/intensity', lidar_images['intensity']),
@@ -129,7 +134,7 @@ def main():
     parser.add_argument('--skip', type=int, default="0", help='skip seconds')
     parser.add_argument('--topics', type=str, default=None, help='Topic list to display')
     parser.add_argument('--lidar_cmap', type=str, default='jet', help='Colormap for lidar images (Default "jet")')
-    parser.add_argument('--outdir', type=str, default='jet', help='Output directory for images')
+    parser.add_argument('--outdir', type=str, default=None, help='Output directory for images')
     args = parser.parse_args()
 
     bag_file = args.bag_file
@@ -139,7 +144,7 @@ def main():
         print('bag_file ' + bag_file + ' does not exist')
         sys.exit()
 
-    if not os.path.isdir(output_dir):
+    if output_dir is not None and not(os.path.isdir(output_dir)):
         print('output_dir ' + output_dir + ' does not exist')
         sys.exit()
 
